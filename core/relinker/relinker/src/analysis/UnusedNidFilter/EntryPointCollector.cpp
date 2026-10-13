@@ -73,11 +73,12 @@ public:
         std::uint16_t phCount = read16(elfBytes, 56);
 
         if (phEntSize < 56) throw RelinkerException("ELF program header entry too small");
+        if (phOff > elfBytes.size() || phCount > (elfBytes.size() - phOff) / phEntSize)
+            throw RelinkerException("Program header out of bounds");
 
         std::vector<LoadSegment> loads;
         for (std::uint16_t i = 0; i < phCount; ++i) {
             std::size_t phPos = static_cast<std::size_t>(phOff) + i * phEntSize;
-            if (phPos + 56 > elfBytes.size()) throw RelinkerException("Program header out of bounds");
             if (read32(elfBytes, phPos) != PT_LOAD) continue;
             loads.push_back({read64(elfBytes, phPos + 16), read64(elfBytes, phPos + 8), read64(elfBytes, phPos + 32)});
         }

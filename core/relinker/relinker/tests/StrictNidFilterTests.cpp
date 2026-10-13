@@ -5,6 +5,7 @@
 #include <relinker/analysis/UnusedNidFilter/EhFrameReader.hpp>
 #include <relinker/analysis/UnusedNidFilter/PltCompactor.hpp>
 #include <relinker/analysis/UnusedNidFilter/IRelativeRelocationIndex.hpp>
+#include <relinker/analysis/UnusedNidFilter/IEntryPointCollector.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <algorithm>
 #include <cstring>
@@ -387,6 +388,39 @@ void filterAndPltCompaction() {
     requireFailure([&] { Relinker::MakeStrictUnusedNidFilter(testProgress)->Filter(references, exceptional, input.Text, input.TextVaddr); }, "Exception metadata was ignored");
 }
 
+void entryPointProgramHeaderBounds() {
+    std::vector<std::uint8_t> bytes(128);
+    bytes[0] = 0x7F; bytes[1] = 'E'; bytes[2] = 'L'; bytes[3] = 'F'; bytes[4] = 2;
+    write<std::uint64_t>(bytes, 24, 0x1000);
+    write<std::uint64_t>(bytes, 32, 64);
+    write<std::uint16_t>(bytes, 54, 56);
+    write<std::uint16_t>(bytes, 56, 1);
+    write<std::uint32_t>(bytes, 64, 1);
+    const auto relocations = Relinker::UnusedNidFilter::BuildRelativeRelocationIndex(bytes);
+    const auto collector = Relinker::UnusedNidFilter::MakeEntryPointCollector();
+    require(collector->Collect(bytes, 0x1000, 64, *relocations) == std::vector<std::uint64_t>{0x1000},
+            "Valid program header table lost its entry point");
+    auto truncated = bytes;
+    truncated.resize(119);
+    requireFailure([&] { collector->Collect(truncated, 0x1000, 64, *relocations); },
+                   "Truncated program header was accepted");
+    auto wrapping = bytes;
+    write<std::uint64_t>(wrapping, 32, std::numeric_limits<std::uint64_t>::max() - 15);
+    requireFailure([&] { collector->Collect(wrapping, 0x1000, 64, *relocations); },
+                   "Wrapping program header offset was accepted");
+    auto shortStride = bytes;
+    write<std::uint16_t>(shortStride, 54, 55);
+    requireFailure([&] { collector->Collect(shortStride, 0x1000, 64, *relocations); },
+                   "Short program header stride was accepted");
+    auto padded = bytes;
+    write<std::uint16_t>(padded, 54, 64);
+    require(collector->Collect(padded, 0x1000, 64, *relocations) == std::vector<std::uint64_t>{0x1000},
+            "Valid padded program header was rejected");
+    padded.resize(127);
+    requireFailure([&] { collector->Collect(padded, 0x1000, 64, *relocations); },
+                   "Truncated program header stride was accepted");
+}
+
 void relativeRelocationTableBounds() {
     std::vector<std::uint8_t> bytes(0x400, 0);
     bytes[0] = 0x7F;
@@ -644,6 +678,7 @@ int main() {
         exceptionDataWithoutPersonality();
         filterCallbackDataImports();
         filterAndPltCompaction();
+        entryPointProgramHeaderBounds();
         relativeRelocationTableBounds();
         sceDynlibDataOffsets();
         std::cout << "Strict NID filter tests passed\n";
