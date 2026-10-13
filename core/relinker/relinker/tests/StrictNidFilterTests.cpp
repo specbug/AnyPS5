@@ -391,8 +391,13 @@ void filterAndPltCompaction() {
 void entryPointProgramHeaderBounds() {
     std::vector<std::uint8_t> bytes(128);
     bytes[0] = 0x7F; bytes[1] = 'E'; bytes[2] = 'L'; bytes[3] = 'F'; bytes[4] = 2;
+    bytes[5] = 1; bytes[6] = 1;
+    write<std::uint16_t>(bytes, 16, 3);
+    write<std::uint16_t>(bytes, 18, 62);
+    write<std::uint32_t>(bytes, 20, 1);
     write<std::uint64_t>(bytes, 24, 0x1000);
     write<std::uint64_t>(bytes, 32, 64);
+    write<std::uint16_t>(bytes, 52, 64);
     write<std::uint16_t>(bytes, 54, 56);
     write<std::uint16_t>(bytes, 56, 1);
     write<std::uint32_t>(bytes, 64, 1);
@@ -412,6 +417,25 @@ void entryPointProgramHeaderBounds() {
     write<std::uint16_t>(shortStride, 54, 55);
     requireFailure([&] { collector->Collect(shortStride, 0x1000, 64, *relocations); },
                    "Short program header stride was accepted");
+    write<std::uint16_t>(shortStride, 54, 0);
+    requireFailure([&] { collector->Collect(shortStride, 0x1000, 64, *relocations); },
+                   "Zero program header stride was accepted");
+    auto multiple = bytes;
+    multiple.resize(64 + 2 * 56);
+    write<std::uint16_t>(multiple, 56, 2);
+    require(collector->Collect(multiple, 0x1000, 64, *relocations) == std::vector<std::uint64_t>{0x1000},
+            "Program header table ending at EOF was rejected");
+    multiple.pop_back();
+    requireFailure([&] { collector->Collect(multiple, 0x1000, 64, *relocations); },
+                   "Truncated second program header was accepted");
+    auto empty = bytes;
+    write<std::uint16_t>(empty, 56, 0);
+    write<std::uint64_t>(empty, 32, empty.size());
+    require(collector->Collect(empty, 0x1000, 64, *relocations) == std::vector<std::uint64_t>{0x1000},
+            "Empty program header table at EOF lost the ELF entry point");
+    write<std::uint64_t>(empty, 32, empty.size() + 1);
+    requireFailure([&] { collector->Collect(empty, 0x1000, 64, *relocations); },
+                   "Program header offset past EOF was accepted with zero entries");
     auto padded = bytes;
     write<std::uint16_t>(padded, 54, 64);
     require(collector->Collect(padded, 0x1000, 64, *relocations) == std::vector<std::uint64_t>{0x1000},

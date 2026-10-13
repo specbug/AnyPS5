@@ -78,7 +78,8 @@ public:
 
         std::vector<LoadSegment> loads;
         for (std::uint16_t i = 0; i < phCount; ++i) {
-            std::size_t phPos = static_cast<std::size_t>(phOff) + i * phEntSize;
+            const std::uint64_t phIndexOff = static_cast<std::uint64_t>(i) * phEntSize;
+            const std::size_t phPos = static_cast<std::size_t>(phOff + phIndexOff);
             if (read32(elfBytes, phPos) != PT_LOAD) continue;
             loads.push_back({read64(elfBytes, phPos + 16), read64(elfBytes, phPos + 8), read64(elfBytes, phPos + 32)});
         }
